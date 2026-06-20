@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>سامانه ثبت هوشمند جلسات</title>
+
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --success: #16a34a;
+      --danger: #dc2626;
+      --warning: #f59e0b;
+      --bg: #f3f4f6;
+      --card: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Tahoma, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      direction: rtl;
+    }
+
+    .app {
+      max-width: 1050px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #2563eb, #1e40af);
+      color: white;
+      padding: 28px;
+      border-radius: 20px;
+      margin-bottom: 24px;
+      box-shadow: 0 12px 30px rgba(37, 99, 235, 0.25);
+    }
+
+    .header h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+    }
+
+    .header p {
+      margin: 0;
+      opacity: 0.9;
+      line-height: 1.8;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 22px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+    }
+
+    .card h2 {
+      margin: 0 0 18px;
+      font-size: 20px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 7px;
+      font-weight: bold;
+      color: #374151;
+    }
+
+    input,
+    textarea,
+    select {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+      background: #fff;
+      transition: 0.2s;
+    }
+
+    input:focus,
+    textarea:focus,
+    select:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+    }
+
+    textarea {
+      resize: vertical;
+      line-height: 1.9;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    .form-group {
+      margin-bottom: 14px;
+    }
+
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    button {
+      border: none;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: 0.2s;
+      color: white;
+      background: var(--primary);
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      filter: brightness(0.96);
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+    }
+
+    .btn-success {
+      background: var(--success);
+    }
+
+    .btn-danger {
+      background: var(--danger);
+    }
+
+    .btn-warning {
+      background: var(--warning);
+      color: #111827;
+    }
+
+    .btn-dark {
+      background: #111827;
+    }
+
+    .status {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: #eff6ff;
+      color: #1d4ed8;
+      border: 1px solid #bfdbfe;
+      line-height: 1.8;
+      font-size: 14px;
+    }
+
+    .status.success {
+      background: #ecfdf5;
+      color: #047857;
+      border-color: #a7f3d0;
+    }
+
+    .status.error {
+      background: #fef2f2;
+      color: #b91c1c;
+      border-color: #fecaca;
+    }
+
+    .status.warning {
+      background: #fffbeb;
+      color: #92400e;
+      border-color: #fde68a;
+    }
+
+    .voice-panel {
+      border: 1px dashed #bfdbfe;
+      background: #f8fbff;
+      padding: 16px;
+      border-radius: 16px;
+      margin-top: 10px;
+    }
+
+    .voice-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      font-weight: bold;
+      color: var(--muted);
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #9ca3af;
+    }
+
+    .dot.recording {
+      background: #ef4444;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.5); opacity: 0.45; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.9;
+      margin-top: 8px;
+    }
+
+    .footer-note {
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 22px;
+      line-height: 1.8;
+    }
+
+    @media (max-width: 720px) {
+      .app {
+        padding: 14px;
+      }
+
+      .header {
+        padding: 20px;
+      }
+
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="app">
+    <section class="header">
+      <h1>سامانه ثبت هوشمند جلسات</h1>
+      <p>
+        نسخه Frontend روی Vercel — مخصوص حل مشکل دسترسی میکروفون در Google Apps Script.
+      </p>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h2>ثبت جلسه جدید</h2>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="meetingTitle">عنوان جلسه</label>
+            <input id="meetingTitle" type="text" placeholder="مثلاً جلسه بررسی پروژه" />
+          </div>
+
+          <div class="form-group">
+            <label for="meetingDate">تاریخ جلسه</label>
+            <input id="meetingDate" type="date" />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="participants">حاضرین جلسه</label>
+            <input id="participants" type="text" placeholder="مثلاً آقای احمدی، خانم رضایی" />
+          </div>
+
+          <div class="form-group">
+            <label for="location">محل برگزاری</label>
+            <input id="location" type="text" placeholder="مثلاً دفتر مرکزی / آنلاین" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="summary">خلاصه جلسه</label>
+          <textarea id="summary" rows="4" placeholder="خلاصه‌ای از موضوعات و تصمیمات جلسه را بنویسید..."></textarea>
+        </div>
+
+        <div class="voice-panel">
+          <div class="voice-indicator">
+            <span id="recordDot" class="dot"></span>
+            <span id="voiceStatus">آماده ضبط صدا</span>
+          </div>
+
+          <div class="buttons">
+            <button class="btn-primary" type="button" onclick="requestMicAndStart()">
+              🎤 شروع ضبط
+            </button>
+
+            <button class="btn-danger" type="button" onclick="stopVoiceRecognition()">
+              ⏹ توقف ضبط
+            </button>
+
+            <button class="btn-warning" type="button" onclick="clearTranscript()">
+              پاک کردن متن ضبط‌شده
+            </button>
+          </div>
+
+          <p class="small">
+            اگر برای اولین بار ضبط را شروع کنی، مرورگر باید درخواست دسترسی به میکروفون نمایش دهد.
+            لطفاً گزینه Allow را بزن. این بار دیگر در قفس iframe گوگل نیستیم، پس اگر باز هم اجازه ندهد،
+            دیگر واقعاً باید به مرورگر یک لیوان آب قند داد.
+          </p>
+        </div>
+
+        <div class="form-group" style="margin-top: 16px;">
+          <label for="transcript">متن تبدیل‌شده از صدا</label>
+          <textarea id="transcript" rows="9" placeholder="متن گفتار اینجا نمایش داده می‌شود..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="decisions">مصوبات / تصمیمات</label>
+          <textarea id="decisions" rows="4" placeholder="مصوبات جلسه را وارد کنید..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="actions">اقدامات بعدی</label>
+          <textarea id="actions" rows="4" placeholder="اقدامات، مسئول هر اقدام و زمان انجام را وارد کنید..."></textarea>
+        </div>
+
+        <div class="buttons">
+          <button id="saveBtn" class="btn-success" type="button" onclick="saveMeeting()">
+            ذخیره جلسه در Google Sheet
+          </button>
+
+          <button class="btn-dark" type="button" onclick="testMicOnly()">
+            تست فقط میکروفون
+          </button>
+        </div>
+
+        <div id="appStatus" class="status">
+          وضعیت: آماده
+        </div>
+      </div>
+    </section>
+
+    <div class="footer-note">
+      این صفحه باید روی دامنه Vercel اجرا شود. آدرس نهایی چیزی شبیه
+      <strong>your-project.vercel.app</strong>
+      خواهد بود.
+    </div>
+  </main>
+
+  <script>
+    /*
+      مهم:
+      اینجا باید لینک Web App گوگل را قرار بدهی.
+      لینک باید شبیه این باشد:
+      https://script.google.com/macros/s/AKfycbxxxxxxxxxxxxxxxx/exec
+    */
+    const GOOGLE_SCRIPT_URL = "PASTE_YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE";
+
+    let recognition = null;
+    let isRecording = false;
+    let finalTranscript = "";
+
+    const $ = (id) => document.getElementById(id);
+
+    window.addEventListener("load", () => {
+      const today = new Date().toISOString().slice(0, 10);
+      $("meetingDate").value = today;
+
+      if (!isSpeechRecognitionSupported()) {
+        setStatus(
+          "مرورگر شما از Speech Recognition پشتیبانی نمی‌کند. لطفاً با Google Chrome یا Microsoft Edge تست کنید.",
+          "warning"
+        );
+      }
+    });
+
+    function setStatus(message, type = "info") {
+      const el = $("appStatus");
+      el.className = "status";
+
+      if (type === "success") el.classList.add("success");
+      if (type === "error") el.classList.add("error");
+      if (type === "warning") el.classList.add("warning");
+
+      el.textContent = "وضعیت: " + message;
+    }
+
+    function setVoiceStatus(message, recording = false) {
+      $("voiceStatus").textContent = message;
+      $("recordDot").classList.toggle("recording", recording);
+    }
+
+    function isSpeechRecognitionSupported() {
+      return "webkitSpeechRecognition" in window || "SpeechRecognition" in window;
+    }
+
+    async function requestMicrophonePermission() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("مرورگر شما getUserMedia را پشتیبانی نمی‌کند.");
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // فقط برای گرفتن Permission است؛ بعداً SpeechRecognition خودش گوش می‌دهد.
+      stream.getTracks().forEach(track => track.stop());
+
+      return true;
+    }
+
+    async function testMicOnly() {
+      try {
+        setStatus("در حال تست دسترسی میکروفون...");
+        await requestMicrophonePermission();
+        setStatus("دسترسی میکروفون با موفقیت فعال است.", "success");
+      } catch (error) {
+        console.error(error);
+        setStatus("خطا در دسترسی میکروفون: " + error.message, "error");
+      }
+    }
+
+    async function requestMicAndStart() {
+      try {
+        setStatus("در حال درخواست دسترسی میکروفون...");
+        await requestMicrophonePermission();
+        setStatus("دسترسی میکروفون تایید شد. شروع ضبط...");
+        startVoiceRecognition();
+      } catch (error) {
+        console.error(error);
+
+        let msg = error.message;
+
+        if (error.name === "NotAllowedError") {
+          msg = "دسترسی میکروفون رد شده است. از تنظیمات مرورگر Microphone را روی Allow بگذارید.";
+        }
+
+        if (error.name === "NotFoundError") {
+          msg = "هیچ میکروفونی روی دستگاه پیدا نشد.";
+        }
+
+        setStatus(msg, "error");
+        setVoiceStatus("ضبط شروع نشد", false);
+      }
+    }
+
+    function startVoiceRecognition() {
+      if (!isSpeechRecognitionSupported()) {
+        setStatus("این مرورگر از تبدیل گفتار به متن پشتیبانی نمی‌کند. از Chrome یا Edge استفاده کنید.", "error");
+        return;
+      }
+
+      if (isRecording) {
+        setStatus("ضبط از قبل در حال انجام است.", "warning");
+        return;
+      }
+
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SpeechRecognition();
+
+      recognition.lang = "fa-IR";
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+
+      finalTranscript = $("transcript").value.trim();
+
+      recognition.onstart = function () {
+        isRecording = true;
+        setVoiceStatus("در حال گوش دادن...", true);
+        setStatus("ضبط صدا شروع شد.", "success");
+      };
+
+      recognition.onresult = function (event) {
+        let interimTranscript = "";
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const text = event.results[i][0].transcript;
+
+          if (event.results[i].isFinal) {
+            finalTranscript += " " + text;
+          } else {
+            interimTranscript += text;
+          }
+        }
+
+        $("transcript").value = (finalTranscript + " " + interimTranscript).trim();
+      };
+
+      recognition.onerror = function (event) {
+        console.error("Speech recognition error:", event);
+
+        let message = "خطا در ضبط صدا: " + event.error;
+
+        if (event.error === "not-allowed") {
+          message = "دسترسی میکروفون توسط مرورگر رد شده است.";
+        }
+
+        if (event.error === "no-speech") {
+          message = "صدایی دریافت نشد. کمی بلندتر یا نزدیک‌تر به میکروفون صحبت کنید.";
+        }
+
+        if (event.error === "audio-capture") {
+          message = "میکروفون پیدا نشد یا توسط برنامه دیگری درگیر است.";
+        }
+
+        setStatus(message, "error");
+        setVoiceStatus("خطا در ضبط", false);
+        isRecording = false;
+      };
+
+      recognition.onend = function () {
+        isRecording = false;
+        setVoiceStatus("ضبط متوقف شد", false);
+      };
+
+      try {
+        recognition.start();
+      } catch (error) {
+        console.error(error);
+        setStatus("شروع ضبط ناموفق بود: " + error.message, "error");
+        setVoiceStatus("ضبط شروع نشد", false);
+      }
+    }
+
+    function stopVoiceRecognition() {
+      if (recognition && isRecording) {
+        recognition.stop();
+        setVoiceStatus("در حال توقف ضبط...", false);
+        setStatus("درخواست توقف ضبط ارسال شد.");
+      } else {
+        setVoiceStatus("ضبطی در حال انجام نیست", false);
+        setStatus("ضبطی در حال انجام نیست.", "warning");
+      }
+    }
+
+    function clearTranscript() {
+      $("transcript").value = "";
+      finalTranscript = "";
+      setStatus("متن ضبط‌شده پاک شد.", "success");
+    }
+
+    function validateForm() {
+      const title = $("meetingTitle").value.trim();
+
+      if (!title) {
+        setStatus("لطفاً عنوان جلسه را وارد کنید.", "warning");
+        $("meetingTitle").focus();
+        return false;
+      }
+
+      return true;
+    }
+
+    async function saveMeeting() {
+      if (!validateForm()) return;
+
+      if (
+        !GOOGLE_SCRIPT_URL ||
+        GOOGLE_SCRIPT_URL === "PASTE_YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE"
+      ) {
+        setStatus("لینک Google Apps Script هنوز داخل کد قرار داده نشده است.", "error");
+        return;
+      }
+
+      const saveBtn = $("saveBtn");
+
+      const payload = {
+        title: $("meetingTitle").value.trim(),
+        date: $("meetingDate").value,
+        participants: $("participants").value.trim(),
+        location: $("location").value.trim(),
+        summary: $("summary").value.trim(),
+        transcript: $("transcript").value.trim(),
+        decisions: $("decisions").value.trim(),
+        actions: $("actions").value.trim(),
+        source: "vercel-frontend",
+        createdAt: new Date().toISOString()
+      };
+
+      try {
+        saveBtn.disabled = true;
+        saveBtn.textContent = "در حال ذخیره...";
+        setStatus("در حال ارسال اطلاعات به Google Apps Script...");
+
+        /*
+          Google Apps Script معمولاً CORS را درست و درمان مثل بچه آدم هندل نمی‌کند.
+          برای همین از no-cors استفاده می‌کنیم.
+          نتیجه مستقیم response را نمی‌خوانیم، ولی دیتا ارسال می‌شود.
+        */
+        await fetch(GOOGLE_SCRIPT_URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8"
+          },
+          body: JSON.stringify(payload)
+        });
+
+        setStatus("اطلاعات ارسال شد. لطفاً Google Sheet را بررسی کنید.", "success");
+        alert("جلسه ارسال شد. حالا Google Sheet را بررسی کن.");
+
+      } catch (error) {
+        console.error(error);
+        setStatus("خطا در ارسال اطلاعات: " + error.message, "error");
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "ذخیره جلسه در Google Sheet";
+      }
+    }
+  </script>
+</body>
+</html>
