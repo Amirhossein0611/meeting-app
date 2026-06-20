@@ -1,11 +1,13 @@
-function doGet() {
-  ensureSheets_();
+/* =========================================================
+   MEETING APP BACKEND - GOOGLE APPS SCRIPT
+   Features:
+   - Receive meeting data from Vercel
+   - Save meeting to Google Sheets
+   - Generate AI summary using OpenAI
+   - Generate PDF report
+   - Save tasks
+========================================================= */
 
-  return HtmlService
-    .createHtmlOutputFromFile('index')
-    .setTitle("Meeting System")
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
 
 /* =========================
    CONFIG
@@ -14,7 +16,13 @@ function doGet() {
 const CONFIG = {
   MEETINGS_SHEET: "Meetings",
   TASKS_SHEET: "Tasks",
-  TIMEZONE: Session.getScriptTimeZone() || "Asia/Tehran"
+  TIMEZONE: "Asia/Tehran",
+
+  // اگر می‌خواهی کلید را مستقیم داخل کد بگذاری، اینجا بگذار
+  // حتماً داخل کوتیشن باشد
+  OPENAI_API_KEY: "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",
+
+  OPENAI_MODEL: "gpt-4o-mini"
 };
 
 const MEETING_HEADERS = [
@@ -22,10 +30,10 @@ const MEETING_HEADERS = [
   "Created At",
   "Title",
   "Summary",
+  "Transcript",
   "PDF URL",
   "PDF Download URL",
-  "PDF File ID",
-  "Transcript"
+  "PDF File ID"
 ];
 
 const TASK_HEADERS = [
@@ -40,107 +48,44 @@ const TASK_HEADERS = [
   "Status"
 ];
 
+
 /* =========================
-   ENSURE SHEETS
+   HTTP ENTRY POINTS
 ========================= */
 
-function ensureSheets_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+function doGet(e) {
+  ensureSheets_();
 
-  let meetingSheet = ss.getSheetByName(CONFIG.MEETINGS_SHEET);
-
-  if (!meetingSheet) {
-    meetingSheet = ss.insertSheet(CONFIG.MEETINGS_SHEET);
-    meetingSheet.appendRow(MEETING_HEADERS);
-    meetingSheet.setFrozenRows(1);
-  } else {
-    ensureMeetingHeaders_(meetingSheet);
-  }
-
-  let taskSheet = ss.getSheetByName(CONFIG.TASKS_SHEET);
-
-  if (!taskSheet) {
-    taskSheet = ss.insertSheet(CONFIG.TASKS_SHEET);
-    taskSheet.appendRow(TASK_HEADERS);
-    taskSheet.setFrozenRows(1);
-  } else {
-    ensureTaskHeaders_(taskSheet);
-  }
+  return ContentService
+    .createTextOutput("Meeting backend is running successfully.")
+    .setMimeType(ContentService.MimeType.TEXT);
 }
 
-function ensureMeetingHeaders_(sheet) {
-  ensureHeaders_(sheet, MEETING_HEADERS);
-}
 
-function ensureTaskHeaders_(sheet) {
-  ensureHeaders_(sheet, TASK_HEADERS);
-}
+function doPost(e) {
+  try {
+    ensureSheets_();
 
-function ensureHeaders_(sheet, requiredHeaders) {
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(requiredHeaders);
-    sheet.setFrozenRows(1);
-    return;
-  }
-
-  const lastColumn = Math.max(sheet.getLastColumn(), 1);
-  const currentHeaders = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
-
-  requiredHeaders.forEach(header => {
-    if (currentHeaders.indexOf(header) === -1) {
-      sheet.getRange(1, sheet.getLastColumn() + 1).setValue(header);
-      currentHeaders.push(header);
+    if (!e || !e.postData || !e.postData.contents) {
+      throw new Error("هیچ داده‌ای از سمت فرانت‌اند دریافت نشد.");
     }
-  });
 
-  sheet.setFrozenRows(1);
-}
+    const data = JSON.parse(e.postData.contents);
+    const result = saveMeeting(data);
 
-function getHeaderMap_(sheet) {
-  const lastColumn = sheet.getLastColumn();
-  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+    return jsonResponse_(result);
 
-  const map = {};
-
-  headers.forEach((header, index) => {
-    if (header) {
-      map[String(header).trim()] = index + 1;
-    }
-  });
-
-  return map;
-}
-
-function getCellByHeader_(row, headerMap, headerName) {
-  const col = headerMap[headerName];
-
-  if (!col) {
-    return "";
+  } catch (err) {
+    return jsonResponse_({
+      success: false,
+      error: err.message
+    });
   }
-
-  return row[col - 1];
 }
 
-function appendRowByHeaders_(sheet, requiredHeaders, rowObject) {
-  ensureHeaders_(sheet, requiredHeaders);
-
-  const headerMap = getHeaderMap_(sheet);
-  const lastColumn = sheet.getLastColumn();
-  const row = new Array(lastColumn).fill("");
-
-  Object.keys(rowObject).forEach(key => {
-    const col = headerMap[key];
-
-    if (col) {
-      row[col - 1] = rowObject[key];
-    }
-  });
-
-  sheet.appendRow(row);
-}
 
 /* =========================
-   SAVE MEETING + TASKS
+   MAIN SAVE FUNCTION
 ========================= */
 
 function saveMeeting(data) {
@@ -152,21 +97,22 @@ function saveMeeting(data) {
     ensureSheets_();
 
     if (!data) {
-      throw new Error("داده‌ای برای ثبت دریافت نشد.");
+      throw new Error("داده جلسه خالی است.");
     }
 
     const title = String(data.title || "").trim();
     const transcript = String(data.transcript || "").trim();
     let summary = String(data.summary || "").trim();
 
-if (!summary && transcript) {
-  summary = summarizeText(transcript);
-}
-
     const tasks = Array.isArray(data.tasks) ? data.tasks : [];
 
     if (!title) {
       throw new Error("عنوان جلسه الزامی است.");
+    }
+
+    // اگر خلاصه از فرانت نیامده باشد، با AI تولید می‌شود
+    if (!summary && transcript) {
+      summary = summarizeText(transcript);
     }
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -181,13 +127,14 @@ if (!summary && transcript) {
       "Created At": createdAt,
       "Title": title,
       "Summary": summary,
+      "Transcript": transcript,
       "PDF URL": "",
       "PDF Download URL": "",
-      "PDF File ID": "",
-      "Transcript": transcript
+      "PDF File ID": ""
     });
 
-    tasks.forEach(task => {
+    // ذخیره تسک‌ها
+    tasks.forEach(function(task) {
       const taskTitle = String(task.title || "").trim();
 
       if (!taskTitle) return;
@@ -196,31 +143,35 @@ if (!summary && transcript) {
         "Task ID": Utilities.getUuid(),
         "Meeting ID": meetingId,
         "Title": taskTitle,
-        "Owner": String(task.owner || "").trim(),
-        "Priority": String(task.priority || "متوسط").trim(),
-        "Start Date": String(task.start || "").trim(),
-        "End Date": String(task.end || "").trim(),
-        "Progress": 0,
-        "Status": "شروع نشده"
+        "Owner": task.owner || "",
+        "Priority": task.priority || "متوسط",
+        "Start Date": task.start || task.startDate || "",
+        "End Date": task.end || task.endDate || "",
+        "Progress": task.progress || 0,
+        "Status": task.status || "شروع نشده"
       });
     });
 
+    // ساخت PDF
     const pdfInfo = generateMeetingPDF(meetingId);
 
+    // ذخیره اطلاعات PDF در شیت
     updateMeetingPdfInfo_(meetingId, pdfInfo);
 
     return {
       success: true,
-      message: "جلسه با موفقیت ثبت شد و PDF ساخته شد.",
+      message: "جلسه با موفقیت ذخیره شد.",
       meetingId: meetingId,
+      summary: summary,
       pdfUrl: pdfInfo.viewUrl,
-      downloadUrl: pdfInfo.downloadUrl
+      downloadUrl: pdfInfo.downloadUrl,
+      fileId: pdfInfo.fileId
     };
 
   } catch (err) {
     return {
       success: false,
-      error: err && err.message ? err.message : String(err)
+      error: err.message
     };
 
   } finally {
@@ -230,54 +181,81 @@ if (!summary && transcript) {
   }
 }
 
+
 /* =========================
-   UPDATE PDF INFO IN SHEET
+   AI SUMMARY
 ========================= */
 
-function updateMeetingPdfInfo_(meetingId, pdfInfo) {
-  ensureSheets_();
+function summarizeText(text) {
+  if (!text) return "";
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const meetingSheet = ss.getSheetByName(CONFIG.MEETINGS_SHEET);
+  const OPENAI_API_KEY = CONFIG.OPENAI_API_KEY;
 
-  const lastRow = meetingSheet.getLastRow();
-
-  if (lastRow < 2) return;
-
-  const headerMap = getHeaderMap_(meetingSheet);
-
-  const meetingIdCol = headerMap["Meeting ID"];
-  const pdfUrlCol = headerMap["PDF URL"];
-  const pdfDownloadCol = headerMap["PDF Download URL"];
-  const pdfFileIdCol = headerMap["PDF File ID"];
-
-  if (!meetingIdCol) return;
-
-  const ids = meetingSheet.getRange(2, meetingIdCol, lastRow - 1, 1).getValues();
-
-  for (let i = 0; i < ids.length; i++) {
-    if (String(ids[i][0]) === String(meetingId)) {
-      const row = i + 2;
-
-      if (pdfUrlCol) {
-        meetingSheet.getRange(row, pdfUrlCol).setValue(pdfInfo.viewUrl || "");
-      }
-
-      if (pdfDownloadCol) {
-        meetingSheet.getRange(row, pdfDownloadCol).setValue(pdfInfo.downloadUrl || "");
-      }
-
-      if (pdfFileIdCol) {
-        meetingSheet.getRange(row, pdfFileIdCol).setValue(pdfInfo.fileId || "");
-      }
-
-      return;
-    }
+  if (!OPENAI_API_KEY || OPENAI_API_KEY === "PUT_YOUR_OPENAI_API_KEY_HERE") {
+    throw new Error("کلید OpenAI تنظیم نشده است. مقدار OPENAI_API_KEY را در CONFIG وارد کن.");
   }
+
+  const url = "https://api.openai.com/v1/chat/completions";
+
+  const payload = {
+    model: CONFIG.OPENAI_MODEL,
+    messages: [
+      {
+        role: "system",
+        content:
+          "تو یک منشی حرفه‌ای جلسات هستی. " +
+          "متن جلسه را به زبان فارسی، رسمی، دقیق و ساختاریافته خلاصه کن. " +
+          "خروجی را دقیقاً با این ساختار تولید کن:\n\n" +
+          "۱- خلاصه مدیریتی\n" +
+          "۲- نکات کلیدی\n" +
+          "۳- تصمیمات جلسه\n" +
+          "۴- اقدامات پیشنهادی\n" +
+          "۵- پیگیری‌های لازم\n\n" +
+          "اگر تصمیم، اقدام یا پیگیری مشخصی در متن وجود نداشت، بنویس: مورد مشخصی ذکر نشده است."
+      },
+      {
+        role: "user",
+        content: text
+      }
+    ],
+    temperature: 0.3
+  };
+
+  const options = {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      Authorization: "Bearer " + OPENAI_API_KEY
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(url, options);
+  const statusCode = response.getResponseCode();
+  const responseText = response.getContentText();
+
+  if (statusCode !== 200) {
+    throw new Error("خطا در ارتباط با OpenAI: " + responseText);
+  }
+
+  const result = JSON.parse(responseText);
+
+  if (
+    !result.choices ||
+    !result.choices[0] ||
+    !result.choices[0].message ||
+    !result.choices[0].message.content
+  ) {
+    throw new Error("پاسخ OpenAI نامعتبر است: " + responseText);
+  }
+
+  return result.choices[0].message.content.trim();
 }
 
+
 /* =========================
-   PDF GENERATOR
+   PDF GENERATION
 ========================= */
 
 function generateMeetingPDF(meetingId) {
@@ -287,49 +265,50 @@ function generateMeetingPDF(meetingId) {
   const meetingSheet = ss.getSheetByName(CONFIG.MEETINGS_SHEET);
   const taskSheet = ss.getSheetByName(CONFIG.TASKS_SHEET);
 
-  const meetings = meetingSheet.getDataRange().getValues();
-  const tasks = taskSheet.getDataRange().getValues();
+  const meetingMap = getHeaderMap_(meetingSheet);
+  const taskMap = getHeaderMap_(taskSheet);
 
-  const meetingHeaderMap = getHeaderMap_(meetingSheet);
-  const taskHeaderMap = getHeaderMap_(taskSheet);
+  const meetingData = meetingSheet.getDataRange().getValues();
+  const taskData = taskSheet.getDataRange().getValues();
 
-  let meeting = null;
-  const relatedTasks = [];
+  let meetingRow = null;
 
-  for (let i = 1; i < meetings.length; i++) {
-    const rowMeetingId = getCellByHeader_(meetings[i], meetingHeaderMap, "Meeting ID");
-
-    if (String(rowMeetingId) === String(meetingId)) {
-      meeting = meetings[i];
+  for (let i = 1; i < meetingData.length; i++) {
+    const row = meetingData[i];
+    if (String(row[meetingMap["Meeting ID"] - 1]) === String(meetingId)) {
+      meetingRow = row;
       break;
     }
   }
 
-  if (!meeting) {
-    throw new Error("جلسه برای تولید PDF پیدا نشد.");
+  if (!meetingRow) {
+    throw new Error("جلسه برای ساخت PDF پیدا نشد.");
   }
 
-  for (let i = 1; i < tasks.length; i++) {
-    const rowMeetingId = getCellByHeader_(tasks[i], taskHeaderMap, "Meeting ID");
+  const relatedTasks = [];
 
-    if (String(rowMeetingId) === String(meetingId)) {
-      relatedTasks.push(tasks[i]);
+  for (let j = 1; j < taskData.length; j++) {
+    const row = taskData[j];
+    if (String(row[taskMap["Meeting ID"] - 1]) === String(meetingId)) {
+      relatedTasks.push(row);
     }
   }
 
-  const meetingTitle = String(getCellByHeader_(meeting, meetingHeaderMap, "Title") || "");
-  const meetingSummary = String(getCellByHeader_(meeting, meetingHeaderMap, "Summary") || "");
-  const meetingTranscript = String(getCellByHeader_(meeting, meetingHeaderMap, "Transcript") || "");
-  const meetingCreatedAt = getCellByHeader_(meeting, meetingHeaderMap, "Created At");
+  const title = meetingRow[meetingMap["Title"] - 1] || "بدون عنوان";
+  const createdAt = meetingRow[meetingMap["Created At"] - 1] || "";
+  const summary = meetingRow[meetingMap["Summary"] - 1] || "";
+  const transcript = meetingRow[meetingMap["Transcript"] - 1] || "";
 
-  const title = sanitizeFileName_(meetingTitle || "Meeting");
-  const createdAtText = formatDateTime_(meetingCreatedAt);
+  const formattedDate = formatDateTime_(createdAt);
+  const safeTitle = sanitizeFileName_(title);
 
-  const doc = DocumentApp.create("صورتجلسه - " + title);
+  const docName = "صورتجلسه - " + safeTitle;
+  const doc = DocumentApp.create(docName);
   const body = doc.getBody();
 
   body.clear();
 
+  // عنوان اصلی
   const mainTitle = body.appendParagraph("صورتجلسه");
   mainTitle
     .setHeading(DocumentApp.ParagraphHeading.HEADING1)
@@ -337,9 +316,13 @@ function generateMeetingPDF(meetingId) {
 
   body.appendParagraph("");
 
+  // اطلاعات جلسه
+  body.appendParagraph("اطلاعات جلسه")
+    .setHeading(DocumentApp.ParagraphHeading.HEADING2);
+
   const infoTable = body.appendTable([
-    ["عنوان جلسه", meetingTitle],
-    ["تاریخ ثبت", createdAtText],
+    ["عنوان جلسه", String(title)],
+    ["تاریخ ثبت", String(formattedDate)],
     ["شناسه جلسه", String(meetingId)]
   ]);
 
@@ -347,95 +330,77 @@ function generateMeetingPDF(meetingId) {
 
   body.appendParagraph("");
 
-  const summaryTitle = body.appendParagraph("خلاصه جلسه");
-  summaryTitle
-    .setHeading(DocumentApp.ParagraphHeading.HEADING2)
-    .setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
+  // خلاصه
+  body.appendParagraph("خلاصه جلسه")
+    .setHeading(DocumentApp.ParagraphHeading.HEADING2);
 
-  const summaryParagraph = body.appendParagraph(meetingSummary || "—");
-  summaryParagraph.setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
-
-  if (meetingTranscript) {
-    body.appendParagraph("");
-
-    const transcriptTitle = body.appendParagraph("متن تبدیل‌شده از گفتار");
-    transcriptTitle
-      .setHeading(DocumentApp.ParagraphHeading.HEADING2)
-      .setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
-
-    const transcriptParagraph = body.appendParagraph(meetingTranscript);
-    transcriptParagraph
-      .setAlignment(DocumentApp.HorizontalAlignment.RIGHT)
-      .setLineSpacing(1.5);
+  if (summary) {
+    appendMultilineParagraph_(body, summary);
+  } else {
+    body.appendParagraph("خلاصه‌ای ثبت نشده است.");
   }
 
   body.appendParagraph("");
 
-  const tasksTitle = body.appendParagraph("مصوبات و تسک‌ها");
-  tasksTitle
-    .setHeading(DocumentApp.ParagraphHeading.HEADING2)
-    .setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
+  // تسک‌ها
+  body.appendParagraph("مصوبات و اقدامات")
+    .setHeading(DocumentApp.ParagraphHeading.HEADING2);
 
   if (relatedTasks.length > 0) {
-    const tableData = [
-      ["ردیف", "عنوان تسک", "مسئول", "اولویت", "شروع", "پایان", "وضعیت"]
+    const taskRows = [
+      ["عنوان", "مسئول", "اولویت", "شروع", "پایان", "پیشرفت", "وضعیت"]
     ];
 
-    relatedTasks.forEach((t, index) => {
-      tableData.push([
-        String(index + 1),
-        String(getCellByHeader_(t, taskHeaderMap, "Title") || ""),
-        String(getCellByHeader_(t, taskHeaderMap, "Owner") || ""),
-        String(getCellByHeader_(t, taskHeaderMap, "Priority") || "متوسط"),
-        String(getCellByHeader_(t, taskHeaderMap, "Start Date") || ""),
-        String(getCellByHeader_(t, taskHeaderMap, "End Date") || ""),
-        String(getCellByHeader_(t, taskHeaderMap, "Status") || "شروع نشده")
+    relatedTasks.forEach(function(row) {
+      taskRows.push([
+        String(row[taskMap["Title"] - 1] || ""),
+        String(row[taskMap["Owner"] - 1] || ""),
+        String(row[taskMap["Priority"] - 1] || ""),
+        String(row[taskMap["Start Date"] - 1] || ""),
+        String(row[taskMap["End Date"] - 1] || ""),
+        String(row[taskMap["Progress"] - 1] || ""),
+        String(row[taskMap["Status"] - 1] || "")
       ]);
     });
 
-    const taskTable = body.appendTable(tableData);
+    const taskTable = body.appendTable(taskRows);
     styleTable_(taskTable);
+
   } else {
-    body.appendParagraph("تسکی برای این جلسه ثبت نشده است.")
-      .setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
+    body.appendParagraph("موردی ثبت نشده است.");
   }
 
   body.appendParagraph("");
-  body.appendParagraph("");
 
-  const signTitle = body.appendParagraph("امضاها");
-  signTitle
-    .setHeading(DocumentApp.ParagraphHeading.HEADING2)
-    .setAlignment(DocumentApp.HorizontalAlignment.RIGHT);
+  // متن کامل جلسه
+  body.appendParagraph("متن کامل جلسه")
+    .setHeading(DocumentApp.ParagraphHeading.HEADING2);
 
-  const signTable = body.appendTable([
-    ["نام و سمت", "امضا", "تاریخ"],
-    ["", "", ""],
-    ["", "", ""]
-  ]);
-
-  styleTable_(signTable);
+  if (transcript) {
+    appendMultilineParagraph_(body, transcript);
+  } else {
+    body.appendParagraph("متن کامل جلسه ثبت نشده است.");
+  }
 
   body.appendParagraph("");
 
-  const footer = body.appendParagraph("این سند به صورت خودکار توسط سیستم جلسات تولید شده است.");
+  const footer = body.appendParagraph("این فایل به‌صورت خودکار توسط سامانه مدیریت جلسات تولید شده است.");
   footer
-    .setAlignment(DocumentApp.HorizontalAlignment.CENTER)
     .setFontSize(9)
-    .setForegroundColor("#666666");
+    .setItalic(true)
+    .setAlignment(DocumentApp.HorizontalAlignment.CENTER);
 
   doc.saveAndClose();
 
   const docFile = DriveApp.getFileById(doc.getId());
-  const pdfBlob = docFile.getAs(MimeType.PDF);
-
-  const pdfName = "صورتجلسه - " + title + ".pdf";
-  pdfBlob.setName(pdfName);
+  const pdfBlob = docFile.getAs(MimeType.PDF).setName(docName + ".pdf");
 
   const pdfFile = DriveApp.createFile(pdfBlob);
 
+  // قابل مشاهده با لینک
   pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
+  // حذف فایل Google Docs واسط، فقط PDF بماند
   docFile.setTrashed(true);
 
   return {
@@ -445,181 +410,175 @@ function generateMeetingPDF(meetingId) {
   };
 }
 
+
 /* =========================
-   GET MEETINGS
+   UPDATE PDF INFO IN SHEET
 ========================= */
 
-function getMeetings() {
-  try {
-    ensureSheets_();
+function updateMeetingPdfInfo_(meetingId, pdfInfo) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(CONFIG.MEETINGS_SHEET);
 
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.MEETINGS_SHEET);
-    const data = sheet.getDataRange().getValues();
+  if (!sheet) {
+    throw new Error("Sheet جلسات پیدا نشد.");
+  }
 
-    if (data.length <= 1) {
-      return [];
+  const map = getHeaderMap_(sheet);
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow < 2) return;
+
+  const idColumn = map["Meeting ID"];
+  const ids = sheet.getRange(2, idColumn, lastRow - 1, 1).getValues();
+
+  for (let i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) === String(meetingId)) {
+      const rowNumber = i + 2;
+
+      sheet.getRange(rowNumber, map["PDF URL"]).setValue(pdfInfo.viewUrl);
+      sheet.getRange(rowNumber, map["PDF Download URL"]).setValue(pdfInfo.downloadUrl);
+      sheet.getRange(rowNumber, map["PDF File ID"]).setValue(pdfInfo.fileId);
+
+      return;
     }
-
-    const headerMap = getHeaderMap_(sheet);
-
-    return data.slice(1)
-      .filter(r => getCellByHeader_(r, headerMap, "Meeting ID"))
-      .reverse()
-      .map(r => ({
-        id: String(getCellByHeader_(r, headerMap, "Meeting ID") || ""),
-        date: formatDateTime_(getCellByHeader_(r, headerMap, "Created At")),
-        title: String(getCellByHeader_(r, headerMap, "Title") || ""),
-        summary: String(getCellByHeader_(r, headerMap, "Summary") || ""),
-        transcript: String(getCellByHeader_(r, headerMap, "Transcript") || ""),
-        pdfUrl: String(getCellByHeader_(r, headerMap, "PDF URL") || ""),
-        downloadUrl: String(getCellByHeader_(r, headerMap, "PDF Download URL") || "")
-      }));
-
-  } catch (err) {
-    throw new Error(err && err.message ? err.message : String(err));
   }
 }
 
+
 /* =========================
-   GET TASKS
+   SHEET SETUP
 ========================= */
 
-function getTasks(meetingId) {
-  try {
-    ensureSheets_();
+function ensureSheets_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.TASKS_SHEET);
-    const data = sheet.getDataRange().getValues();
+  let meetingSheet = ss.getSheetByName(CONFIG.MEETINGS_SHEET);
 
-    if (data.length <= 1) {
-      return [];
-    }
+  if (!meetingSheet) {
+    meetingSheet = ss.insertSheet(CONFIG.MEETINGS_SHEET);
+    meetingSheet.appendRow(MEETING_HEADERS);
+    meetingSheet.setFrozenRows(1);
+  } else {
+    ensureHeaders_(meetingSheet, MEETING_HEADERS);
+  }
 
-    const headerMap = getHeaderMap_(sheet);
+  let taskSheet = ss.getSheetByName(CONFIG.TASKS_SHEET);
 
-    return data.slice(1)
-      .filter(r => String(getCellByHeader_(r, headerMap, "Meeting ID")) === String(meetingId))
-      .map(r => ({
-        id: String(getCellByHeader_(r, headerMap, "Task ID") || ""),
-        title: String(getCellByHeader_(r, headerMap, "Title") || ""),
-        owner: String(getCellByHeader_(r, headerMap, "Owner") || ""),
-        priority: String(getCellByHeader_(r, headerMap, "Priority") || ""),
-        start: String(getCellByHeader_(r, headerMap, "Start Date") || ""),
-        end: String(getCellByHeader_(r, headerMap, "End Date") || ""),
-        progress: Number(getCellByHeader_(r, headerMap, "Progress") || 0),
-        status: String(getCellByHeader_(r, headerMap, "Status") || "شروع نشده")
-      }));
-
-  } catch (err) {
-    throw new Error(err && err.message ? err.message : String(err));
+  if (!taskSheet) {
+    taskSheet = ss.insertSheet(CONFIG.TASKS_SHEET);
+    taskSheet.appendRow(TASK_HEADERS);
+    taskSheet.setFrozenRows(1);
+  } else {
+    ensureHeaders_(taskSheet, TASK_HEADERS);
   }
 }
 
-/* =========================
-   UPDATE TASK
-========================= */
 
-function updateTaskProgress(taskId, progress) {
-  try {
-    ensureSheets_();
+function ensureHeaders_(sheet, requiredHeaders) {
+  const lastColumn = sheet.getLastColumn();
 
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CONFIG.TASKS_SHEET);
-    const data = sheet.getDataRange().getValues();
-
-    const headerMap = getHeaderMap_(sheet);
-
-    const taskIdCol = headerMap["Task ID"];
-    const progressCol = headerMap["Progress"];
-    const statusCol = headerMap["Status"];
-
-    if (!taskIdCol || !progressCol || !statusCol) {
-      throw new Error("ستون‌های لازم برای به‌روزرسانی تسک پیدا نشد.");
-    }
-
-    const numericProgress = Math.max(0, Math.min(100, Number(progress) || 0));
-
-    for (let i = 1; i < data.length; i++) {
-      if (String(data[i][taskIdCol - 1]) === String(taskId)) {
-        sheet.getRange(i + 1, progressCol).setValue(numericProgress);
-
-        const status =
-          numericProgress === 0 ? "شروع نشده" :
-          numericProgress === 100 ? "انجام شده" :
-          "درحال انجام";
-
-        sheet.getRange(i + 1, statusCol).setValue(status);
-
-        return {
-          success: true,
-          status: status,
-          progress: numericProgress
-        };
-      }
-    }
-
-    return {
-      success: false,
-      error: "تسک پیدا نشد."
-    };
-
-  } catch (err) {
-    return {
-      success: false,
-      error: err && err.message ? err.message : String(err)
-    };
+  // اگر شیت کاملاً خالی باشد
+  if (lastColumn === 0 || sheet.getLastRow() === 0) {
+    sheet.appendRow(requiredHeaders);
+    sheet.setFrozenRows(1);
+    return;
   }
+
+  const currentHeaders = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+
+  requiredHeaders.forEach(function(header) {
+    if (currentHeaders.indexOf(header) === -1) {
+      sheet.getRange(1, sheet.getLastColumn() + 1).setValue(header);
+    }
+  });
+
+  sheet.setFrozenRows(1);
 }
 
-/* =========================
-   DASHBOARD
-========================= */
 
-function getTasksDashboard() {
-  try {
-    ensureSheets_();
+function getHeaderMap_(sheet) {
+  const lastColumn = sheet.getLastColumn();
 
-    const sheet = SpreadsheetApp
-      .getActiveSpreadsheet()
-      .getSheetByName(CONFIG.TASKS_SHEET);
-
-    const data = sheet.getDataRange().getValues();
-
-    if (data.length <= 1) {
-      return [];
-    }
-
-    const headerMap = getHeaderMap_(sheet);
-
-    return data.slice(1).map(r => ({
-      title: String(getCellByHeader_(r, headerMap, "Title") || ""),
-      progress: Number(getCellByHeader_(r, headerMap, "Progress") || 0)
-    }));
-
-  } catch (err) {
-    throw new Error(err && err.message ? err.message : String(err));
+  if (lastColumn === 0) {
+    throw new Error("هیچ ستونی در Sheet وجود ندارد.");
   }
+
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  const map = {};
+
+  headers.forEach(function(header, index) {
+    map[String(header).trim()] = index + 1;
+  });
+
+  return map;
 }
 
+
+function appendRowByHeaders_(sheet, headers, obj) {
+  ensureHeaders_(sheet, headers);
+
+  const map = getHeaderMap_(sheet);
+  const row = new Array(sheet.getLastColumn()).fill("");
+
+  Object.keys(obj).forEach(function(key) {
+    if (map[key]) {
+      row[map[key] - 1] = obj[key];
+    }
+  });
+
+  sheet.appendRow(row);
+}
+
+
 /* =========================
-   HELPERS
+   HELPER FUNCTIONS
 ========================= */
+
+function jsonResponse_(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
 
 function formatDateTime_(value) {
   if (!value) return "";
 
-  try {
-    const date = value instanceof Date ? value : new Date(value);
-    return Utilities.formatDate(date, CONFIG.TIMEZONE, "yyyy/MM/dd HH:mm");
-  } catch (e) {
+  let date;
+
+  if (value instanceof Date) {
+    date = value;
+  } else {
+    date = new Date(value);
+  }
+
+  if (isNaN(date.getTime())) {
     return String(value);
   }
+
+  return Utilities.formatDate(date, CONFIG.TIMEZONE, "yyyy/MM/dd HH:mm");
 }
 
+
 function sanitizeFileName_(name) {
-  return String(name || "Meeting")
+  return String(name || "meeting")
     .replace(/[\\\/:*?"<>|#%{}~&]/g, "-")
     .substring(0, 80);
 }
+
+
+function appendMultilineParagraph_(body, text) {
+  const lines = String(text || "").split(/\n+/);
+
+  lines.forEach(function(line) {
+    const cleanLine = line.trim();
+
+    if (cleanLine) {
+      body.appendParagraph(cleanLine);
+    }
+  });
+}
+
 
 function styleTable_(table) {
   table.setBorderWidth(1);
@@ -629,106 +588,47 @@ function styleTable_(table) {
 
     for (let c = 0; c < row.getNumCells(); c++) {
       const cell = row.getCell(c);
-
-      cell.setPaddingTop(6);
-      cell.setPaddingBottom(6);
-      cell.setPaddingLeft(6);
-      cell.setPaddingRight(6);
-
       const text = cell.editAsText();
+
       text.setFontFamily("Arial");
       text.setFontSize(10);
 
       if (r === 0) {
         text.setBold(true);
-        cell.setBackgroundColor("#eeeeee");
+        cell.setBackgroundColor("#E8F0FE");
       }
     }
   }
 }
-function summarizeText(text) {
-  const OPENAI_API_KEY = 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;
 
-  const url = "https://api.openai.com/v1/chat/completions";
 
-  const payload = {
-    model: "gpt-4o-mini",
-    messages: [
+/* =========================
+   OPTIONAL TEST FUNCTION
+   این تابع را دستی Run کن برای تست
+========================= */
+
+function testSaveMeeting() {
+  const sampleData = {
+    title: "جلسه تست",
+    transcript: "در این جلسه درباره برنامه توسعه محصول، زمان‌بندی انتشار نسخه جدید و تقسیم وظایف بین اعضای تیم صحبت شد. تصمیم گرفته شد نسخه اولیه تا پایان ماه آماده شود.",
+    tasks: [
       {
-        role: "system",
-        content: "تو یک منشی حرفه‌ای جلسات هستی. متن جلسه را به صورت رسمی و ساختاریافته خلاصه کن."
+        title: "آماده‌سازی نسخه اولیه محصول",
+        owner: "علی",
+        priority: "بالا",
+        start: "2026/06/20",
+        end: "2026/06/30"
       },
       {
-        role: "user",
-        content: text
+        title: "بررسی نیازمندی‌های مشتری",
+        owner: "سارا",
+        priority: "متوسط",
+        start: "2026/06/21",
+        end: "2026/06/25"
       }
-    ],
-    temperature: 0.3
+    ]
   };
 
-  const options = {
-    method: "post",
-    contentType: "application/json",
-    headers: {
-      Authorization: "Bearer " + OPENAI_API_KEY
-    },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  };
-
-  const response = UrlFetchApp.fetch(url, options);
-  const result = JSON.parse(response.getContentText());
-
-  return result.choices[0].message.content;
-}
-function summarizeText(text) {
-  if (!text) return "";
-
-  const OPENAI_API_KEY = "YOUR_OPENAI_API_KEY_HERE"; // ← کلیدت را اینجا بگذار
-
-  const url = "https://api.openai.com/v1/chat/completions";
-
-  const payload = {
-    model: "gpt-4o-mini",
-    messages: [
-      {
-        role: "system",
-        content: `
-تو یک منشی حرفه‌ای جلسات هستی.
-متن جلسه را به صورت ساختاریافته تولید کن با قالب زیر:
-
-۱- خلاصه مدیریتی
-۲- نکات کلیدی
-۳- تصمیمات
-۴- اقدامات پیشنهادی
-        `
-      },
-      {
-        role: "user",
-        content: text
-      }
-    ],
-    temperature: 0.3
-  };
-
-  const options = {
-    method: "post",
-    contentType: "application/json",
-    headers: {
-      Authorization: "Bearer " + OPENAI_API_KEY
-    },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  };
-
-  const response = UrlFetchApp.fetch(url, options);
-  const code = response.getResponseCode();
-
-  if (code !== 200) {
-    throw new Error("خطا از OpenAI: " + response.getContentText());
-  }
-
-  const result = JSON.parse(response.getContentText());
-
-  return result.choices[0].message.content.trim();
+  const result = saveMeeting(sampleData);
+  Logger.log(result);
 }
